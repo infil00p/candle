@@ -1,0 +1,98 @@
+#include "util.pwgsl"
+
+// THD (Token/Head/Dim) layout rotary embeddings
+// The contiguous variant: x0 in first D/2, x1 in second D/2
+// y0 = x0*cos - x1*sin ; y1 = x0*sin + x1*cos
+//
+// Buffers:
+// @group(0) @binding(0) var<storage, read_write> v_dest: array<DTYPE>;   // output (same layout as src)
+// @group(0) @binding(1) var<storage> op_meta : array<u32>;             // small parameter list
+// @group(0) @binding(2) var<storage> v_input1: array<DTYPE>;           // src (s1)
+// @group(0) @binding(3) var<storage> v_input2: array<DTYPE>;           // cos  (s2)
+// @group(0) @binding(4) var<storage> v_input3: array<DTYPE>;           // sin  (s3)
+//
+// op_meta layout (u32):
+// [0] = B         // batch
+// [1] = T         // tokens / seq length
+// [2] = H         // heads
+// [3] = D         // head dim (must be even; first D/2 and second D/2)
+// [4] = src_offset
+// [5] = cos_offset
+// [6] = sin_offset
+// [7] = unbatched_rope  // 0 => batched rope (shared across batches), 1 => unbatched rope
+//
+// Layout: (B, T, H, D)
+// Index: ((b * T + t) * H + h) * D + d
+//
+// Work distribution:
+//   global_invocation_id.x -> batch index (0..B-1)
+//   global_invocation_id.y -> flat index over T * H * (D/2)
+
+override CONSTV_0 : u32 = 0u;
+
+@compute
+@workgroup_size(8,8,1)
+fn rotary_emb_thd(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    // read op_meta
+    let B = op_meta[0];
+    let T = op_meta[1];
+    let H = op_meta[2];
+    let D = op_meta[3];
+
+    let src_offset = op_meta[4];
+    let cos_offset = op_meta[5];
+    let sin_offset = op_meta[6];
+
+    let unbatched = CONSTV_0;
+
+    // quick guards
+    if (D == 0u) { return; }
+    if ((D & 1u) == 1u) { return; }  // D must be even
+
+    let half = D / 2u;  // number of pairs
+
+    let b_idx = global_id.x;
+    let thd_flat = global_id.y;  // flat index over T * H * (D/2)
+
+    // bounds checks
+    if (b_idx >= B) { return; }
+    if (thd_flat >= T * H * half) { return; }
+
+    // Decompose thd_flat into t, h, d_idx
+    // thd_flat = t * H * half + h * half + d_idx
+    let th_flat = thd_flat / half;
+    let d_idx = thd_flat % half;
+
+    let t_idx = th_flat / H;
+    let h_idx = th_flat % H;
+
+    // Compute base index for this (b, t, h) in layout (B, T, H, D)
+    let base = ((b_idx * T + t_idx) * H + h_idx) * D;
+
+    // Pair positions: first half and second half
+    let idx0 = base + d_idx;
+    let idx1 = base + d_idx + half;
+
+    // Compute rope index for cos/sin lookup
+    // cos/sin layout matches token and dimension pair
+    var rope_i: u32 = t_idx * half + d_idx;
+    if (unbatched == 1u) {
+        rope_i = rope_i + b_idx * (T * half);
+    }
+
+    // Load values
+    let x0: DTYPE = v_input1[idx0 + src_offset];
+    let x1: DTYPE = v_input1[idx1 + src_offset];
+    let c: DTYPE = v_input2[rope_i + cos_offset];
+    let s: DTYPE = v_input3[rope_i + sin_offset];
+
+    // Compute rotary embedding
+    // y0 = x0 * cos - x1 * sin
+    // y1 = x0 * sin + x1 * cos
+    let y0: DTYPE = x0 * c - x1 * s;
+    let y1: DTYPE = x0 * s + x1 * c;
+
+    // Write back
+    v_dest[idx0] = y0;
+    v_dest[idx1] = y1;
+}

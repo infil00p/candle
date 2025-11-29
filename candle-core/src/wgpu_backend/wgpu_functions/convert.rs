@@ -16,11 +16,10 @@ pub fn queue_convert_u8_to_f32(
     let pipeline = queue.get_pipeline(Pipelines::Convert(DType::U8, Functions::ConvertU8ToF32));
     let bind_group =
         dev.create_bind_group_input1(buffer_dest, buffer_input, BindgroupAlignment::Aligned4);
-    queue.enqueue_64(
+    queue.enqueue_64_big(
         pipeline,
         bind_group,
         input_layout.shape().elem_count() as u32,
-        input_layout.shape().elem_count(),
     );
     Ok(())
 }
@@ -40,7 +39,7 @@ pub fn queue_convert_u32_to_u8(
 
     let bind_group =
         dev.create_bind_group_input1(buffer_dest, buffer_input, BindgroupAlignment::Aligned4);
-    queue.enqueue_64(pipeline, bind_group, size.div_ceil(4), size as usize);
+    queue.enqueue_64_big(pipeline, bind_group, size.div_ceil(4));
     Ok(())
 }
 
@@ -59,7 +58,7 @@ pub fn queue_convert_f32_to_u8(
 
     let bind_group =
         dev.create_bind_group_input1(buffer_dest, buffer_input, BindgroupAlignment::Aligned4);
-    queue.enqueue_64(pipeline, bind_group, size.div_ceil(4), size as usize);
+    queue.enqueue_64_big(pipeline, bind_group, size.div_ceil(4));
     Ok(())
 }
 
@@ -78,7 +77,7 @@ pub fn queue_convert_f32_to_f16(
 
     let bind_group =
         dev.create_bind_group_input1(buffer_dest, buffer_input, BindgroupAlignment::Aligned4);
-    queue.enqueue_64(pipeline, bind_group, size.div_ceil(2), size as usize);
+    queue.enqueue_64_big(pipeline, bind_group, size.div_ceil(2));
     Ok(())
 }
 
@@ -97,7 +96,7 @@ pub fn queue_convert_f16_to_f32(
 
     let bind_group =
         dev.create_bind_group_input1(buffer_dest, buffer_input, BindgroupAlignment::Aligned4);
-    queue.enqueue_64(pipeline, bind_group, size.div_ceil(2), size as usize);
+    queue.enqueue_64_big(pipeline, bind_group, size.div_ceil(2));
     Ok(())
 }
 
@@ -135,11 +134,10 @@ pub fn queue_convert(
         BindgroupAlignmentLayout::Bindgroup1(dest_dtype.into(), input_dtype.into()),
     );
 
-    queue.enqueue_64(
+    queue.enqueue_64_big(
         pipeline,
         bind_group,
         input_layout.shape().elem_count() as u32,
-        input_layout.shape().elem_count(),
     );
     Ok(())
 }
